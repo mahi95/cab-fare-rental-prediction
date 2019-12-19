@@ -192,30 +192,193 @@ master_df$day_of_travel = weekdays(as.POSIXct(master_df$date_of_travel), abbrevi
 # deriving date column
 master_df$date_of_travel = substr(as.character(master_df$date_of_travel), 9, 10)
 
+# deriving hour column
+master_df$hour_of_travel = substr(as.factor(master_df$pickup_datetime), 12, 13)
+
 # dropping the pickup_datetime column since we have derived the necessary features from the data
 master_df$pickup_datetime = NULL
 
 # calculating distance using haversine formula
-calc_geo_dist = 
+# importing the required library
+library(purrr)
+library(geosphere)
+library(rlist)
+
+calc_geo_dist = function(pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude) {
+  loadNamespace('purrr')
+  loadNamespace('geosphere')
+  pickup_coor = purrr::map2(pickup_longitude, pickup_latitude, function(x,y) c(x,y))
+  dropoff_coor = purrr::map2(dropoff_longitude, dropoff_latitude, function(x,y) c(x,y))
+  distance_list = purrr::map2(pickup_coor, dropoff_coor, function(x,y) geosphere::distHaversine(x,y))
+  distance = list.extract(distance_list, position=1)
+  return(distance/1000.0)
+}
+
+for (i in 1:nrow(master_df)){
+  master_df$distance[i] = calc_geo_dist(master_df$pickup_longitude[i], 
+                                        master_df$pickup_latitude[i],
+                                        master_df$dropoff_longitude[i],
+                                        master_df$dropoff_latitude[i])
+}
+
+# checking for outliers in distance
+ggplot(aes_string(x='distance', y='fare_amount'), data=master_df)+
+  stat_boxplot(geom = 'errorbar', width=0.5) +
+  geom_boxplot(oulier.colour="red", fill="grey", outlier.size = 1, notch = F) +
+  theme(legend.position = "bottom") +
+  ggtitle(paste("Outlier detection for distance"))
+
+# checking the head of distance
+head(master_df)
+
+# checking the summary of distance
+summary(master_df$distance)
+
+# checking for distance less than 1(For log transformation in the future case)
+dim(master_df[master_df$distance < 1,])
+
+# Total of 2978 rows with distance less than 1
+# computing them with the mean
+master_df[master_df$distance < 1, 'distance'] = mean(master_df$distance)
+
+# recheck the distance
+dim(master_df[master_df$distance < 1,])
+
+### Data preprocessing is complete. copying into the duplicate data
+master_comp_preprocessed_data = master_df
+dim(master_df)
+
+################################# Exploratory data analysis #################################
+### Univariate analysis ###
+# appending distance with cnames
+append(cnames, 'distance', after=length(cnames))
+
+# creating a function for histogram plot for univariate analysis
+create_hist_plot = function (x) {
+  ggplot(master_df, aes_string(x=x)) +
+    geom_histogram(fill='blue', colour='black')+
+    geom_density()+
+    theme_bw()+
+    xlab(x) + ylab('frequency') + ggtitle(paste0('distribution of data ', x))
+}
+
+# distribution of fare_amount
+create_hist_plot('fare_amount')
+
+# distribution of pickup_longitude
+create_hist_plot('pickup_longitude')
+
+# distribution of pickup_latitude
+create_hist_plot('pickup_latitude')
+
+# distribution of dropoff_longitude
+create_hist_plot('dropoff_longitude')
+
+# distribution of dropoff_latitude
+create_hist_plot('dropoff_latitude')
+
+# distribution of passenger_count
+create_hist_plot('passenger_count')
+
+# distribution of distance
+create_hist_plot('distance')
+
+### Inferences ###
+# distance data seems skewed a little bit left
+
+### Bivariate analysis ###
+# analysis between target variable and independent variable
+# creating bar plot for analysis b/w categorical and target variable
+
+create_bar_plot = function(x){
+  ggplot(master_df, aes_string(x=x, y='fare_amount')) +
+    geom_bar(stat='identity', color='blue')+
+    labs(title=paste0('fare amount vs ', x), x=x, y='fare_amount') 
+}
+
+# bar plot b/w fare_amount and year_of_travel
+create_bar_plot('year_of_travel')
+
+# bar plot b/w fare_amount and month_of_travel
+create_bar_plot('month_of_travel')
+
+# removing nan values in month_of_travel
+sum(is.na(master_df$month_of_travel))
+master_df = na.omit(master_df)
+
+# bar plot b/w fare_amount and day_of_travel
+create_bar_plot('day_of_travel')
+
+# bar plot b/w hour_of_travel and fare_amount
+create_bar_plot('hour_of_travel')
+
+# creating scatter plot for bivariate analysis b/w continuous and target variable
+create_scatter_plot = function(x){
+  ggplot(master_df, aes_string(x=x, y='fare_amount'))+
+    geom_point(color='blue') +
+    labs(title=paste0('fare_amount vs ', x), x=x, y='fare_amount')
+}
+
+# pickup_longitude
+create_scatter_plot('pickup_longitude')
+
+# pickup_latitude
+create_scatter_plot('pickup_latitude')
+
+# dropoff_longitude
+create_scatter_plot('dropoff_longitude')
+
+# dropoff_latitude
+create_scatter_plot('dropoff_latitude')
+
+# passenger_count
+create_scatter_plot('passenger_count')
+
+# distance
+create_scatter_plot('distance')
 
 
+################################# Feature selection #################################
+# finding the continuous variables for correlation plot
+c_index = sapply(master_df, is.numeric)
+c_data = master_df[, c_index]
+cnames = colnames(c_data)
+
+# correlation plot for selecting features needed for model development
+cor_analysis = cor(master_df[, c_index])
+corrgram(master_df[,c_index], order=F, upper.panel=panel.pie, text.panel=panel.txt, main="Correlation Plot")
+
+#Inferences
+#distance is highly positively correlated with fare_amount,,, needed variable for model development
+
+# chi-square test for categorical variables
+chr_index = sapply(master_df, is.character)
+chr_data = master_df[,chr_index]
+
+for(i in 1:5){
+  print(names(chr_data)[i])
+  print(chisq.test(table(master_df$fare_amount, chr_data[,i])))
+}
 
 
+# Infernces
+# p-value of date_of_travel and day_of_travel are greater than 0.05, hence dropping the columns
+
+master_df$date_of_travel = NULL
+master_df$day_of_travel = NULL
 
 
+################################# Feature scaling #################################
 
+# plotting distance to check the normality
+hist(master_df$distance, col='blue')
 
+# since the data is right skewed taking log transformation of the data
+master_df$log_distance = log(master_df$distance)
 
+# rechecking the log_distance for normality
+hist(master_df$log_distance, col='blue')
 
-
-
-
-
-
-
-
-
-
-
+## Data is normally distributed and ready for model development
 
 
