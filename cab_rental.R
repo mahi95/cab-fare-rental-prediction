@@ -379,6 +379,161 @@ master_df$log_distance = log(master_df$distance)
 # rechecking the log_distance for normality
 hist(master_df$log_distance, col='blue')
 
+# dropping distance since we have log_distance
+master_df$distance = NULL
+
 ## Data is normally distributed and ready for model development
+
+
+
+################################# Model development #################################
+# dividing the data into train and test set
+set.seed(1234)
+train.index = createDataPartition(master_df$fare_amount, p=0.7, list=F)
+train_df = master_df[train.index, ]
+test_df = master_df[-train.index, ]
+
+
+## Linear Regression ##
+#Building the model
+lr_model = lm(fare_amount ~., data=train_df)
+summary(lr_model)
+
+# checking for vif
+library(car)
+vif(lr_model)
+
+#Inference: No multicollinearity b/w Independent variables
+# predicting fare_amount from the test data
+lr_predictions = predict(lr_model, test_df[,-1])
+
+
+# Error metrics
+postResample(lr_predictions, test_df$fare_amount)
+
+# RMSE  Rsquared       MAE 
+# 3.6816248 0.5504618 2.7413535
+
+# calculating mape
+cal_mape = function(y_true, y_pred){
+  mean(abs((y_true - y_pred)/y_true))
+}
+
+lr_mape = cal_mape(test_df$fare_amount, lr_predictions)
+
+# lr_mape = 0.3803898
+
+## Decision Tree ##
+library(rpart)
+
+#Building the model
+dt_model = rpart(fare_amount ~., data = train_df, method = 'anova')
+
+# plotting decision tree
+library(rpart.plot)
+rpart.plot(dt_model)
+
+#prediciting the fare_amount using decision tree model
+dt_predictions = predict(dt_model, test_df[,-1])
+
+# Error metrics
+postResample(dt_predictions, test_df$fare_amount)
+
+# RMSE  Rsquared       MAE 
+# 3.1484394 0.6711383 2.1770615
+
+dt_mape = cal_mape(test_df$fare_amount, dt_predictions)
+
+# dt_mape = 0.24565
+
+## Random Forest ##
+#Building the model
+rf_model = randomForest(fare_amount~., data=train_df, importance=T, ntree=200)
+
+#predicting fare_amount using test data
+rf_predictions = predict(rf_model, test_df[,-1])
+
+#error metrics
+postResample(rf_predictions, test_df$fare_amount)
+
+# RMSE  Rsquared       MAE 
+# 2.6525098 0.7667685 1.7286498
+
+rf_mape = cal_mape(test_df$fare_amount, rf_predictions)
+
+# rf_mape = 0.2057309
+
+## Inferences
+# From the above 3 models, random forest proved to be the better model. Evaluating the model with the new unseen data.
+
+
+################################# Model evaluation #################################
+
+# loading the new test data
+test_new_df = read.csv('test.csv')
+
+# Implementing all the preprocessing steps during model development
+test_new_df$date_of_travel = as.Date(test_new_df$pickup_datetime)
+
+# splitting years, month and day from the date_of_travel variable
+test_new_df$year_of_travel = substr(as.character(test_new_df$date_of_travel),1,4)
+test_new_df$month_of_travel = substr(as.character(test_new_df$date_of_travel), 6,7)
+test_new_df$day_of_travel = weekdays(as.POSIXct(test_new_df$date_of_travel), abbreviate = F)
+test_new_df$date_of_travel = substr(as.character(test_new_df$date_of_travel), 9,10)
+test_new_df$hour_of_travel = substr(as.character(test_new_df$pickup_datetime),12, 13)
+
+#dropping pickup_datetime
+test_new_df$pickup_datetime = NULL
+
+#checking for missing values
+sum(is.na(test_new_df)) # No missing values
+
+# calculating distance using calc_geo_dist function
+for (i in 1:nrow(test_new_df)){
+  test_new_df$distance[i] = calc_geo_dist(test_new_df$pickup_longitude[i],
+                                          test_new_df$pickup_latitude[i],
+                                          test_new_df$dropoff_longitude[i],
+                                          test_new_df$dropoff_latitude[i])
+}
+
+# converting the distance values less than 1 to their mean value
+test_new_df$distance[test_new_df$distance < 1] = mean(test_new_df$distance)
+
+#deleting the variable day_of_travel and date_of_travel as a result of chi-square test
+test_new_df$date_of_travel = NULL
+test_new_df$day_of_travel = NULL
+
+# plotting distance column
+hist(test_new_df$distance, col='blue')
+
+# data is skewed to left so taking log_distance and dropping distance column
+test_new_df$log_distance = log(test_new_df$distance)
+hist(test_new_df$log_distance, col='blue')
+test_new_df$distance = NULL
+
+# predicting fare_amount
+fare_amount_predictions = predict(rf_model, test_new_df)
+test_new_df$predicted_fare_amount = fare_amount_predictions
+
+# writing the output into the csv file
+write.csv(test_new_df, 'cab_fare_prediction_R.csv', row.names = F)
+
+#------------------------------------Completed------------------------------------------#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
